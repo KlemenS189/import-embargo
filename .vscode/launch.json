@@ -39,6 +39,15 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": ["tests/test_structure/module_d/service_with_bad_import.py"]
-        }
+        },
+        {
+            "name": "Python Debugger: Run checks for module_f with inter module checks",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": ["tests/test_structure/module_f"]
+        }        
     ]
 }

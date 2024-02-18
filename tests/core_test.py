@@ -43,6 +43,7 @@ def test_build_allowed_modules_tree():
         ],
         path="/test/test",
         allowed_export_modules=[],
+        bypass_export_check_for_modules=[],
     )
     assert build_allowed_modules_tree(config, mode=ModuleTreeBuildingMode.IMPORT) == {
         "a": {"b": {"c": {}}, "d": {"e": {}, "f": {}}},
@@ -94,7 +95,12 @@ def test_get_package_tree():
             "service_with_bad_import.py": None,
         },
         "module_e": {"__init__.py": None, "private_service.py": None},
-        "module_f": {"__init__.py": None, "public_service.py": None},
+        "module_f": {
+            "__init__.py": None,
+            "public_service.py": None,
+            "private_service.py": None,
+            "private_submodule_f": {"__init__.py": None, "utils.py": None},
+        },
     }
 
 
@@ -160,7 +166,7 @@ def test_get_filenames_to_check():
     assert len(filenames) == 4
 
     filenames = get_filenames_to_check(app_root_path=root_path, filenames=["tests"])
-    assert len(filenames) == 18
+    assert len(filenames) == 21
 
 
 def test_main_with_fail_import():
@@ -184,9 +190,23 @@ def test_main_with_fail_export():
         assert err.value.code == -1
 
 
-def test_main_happy_path():
-    args = [
-        "tests/test_structure/module_b",
-        "tests/test_structure/module_d/service.py",
-    ]
+@pytest.mark.parametrize(
+    "args",
+    (
+        (
+            [
+                "tests/test_structure/module_b",
+                "tests/test_structure/module_d/service.py",
+                "tests/test_structure/module_f",
+            ]
+        ),
+        [
+            "tests/test_structure/module_f/private_submodule_f",
+        ],
+        [
+            "tests/test_structure/module_f/private_submodule_f/__init__.py",
+        ],
+    ),
+)
+def test_main_happy_path(args):
     main(args)

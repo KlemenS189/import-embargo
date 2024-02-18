@@ -1,3 +1,4 @@
 {
-  "allowed_export_modules": ["tests.test_structure.module_f.public_service"]
+  "allowed_export_modules": ["tests.test_structure.module_f.public_service"],
+  "bypass_export_check_for_modules": ["tests.test_structure.module_f"]
 }

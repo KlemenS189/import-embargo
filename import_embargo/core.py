@@ -13,12 +13,14 @@ IGNORE_LIST = {"__pycache__", ".mypy_cache", ".DS_Store", ".ruff_cache"}
 class Config:
     allowed_import_modules: list[str] | None
     allowed_export_modules: list[str] | None
+    bypass_export_check_for_modules: list[str]
     path: str
 
 
 class ModuleTreeBuildingMode(enum.Enum):
     IMPORT = "IMPORT"
     EXPORT = "EXPORT"
+    BYPASS = "BYPASS"
 
 
 ConfigLookup: TypeAlias = dict[str, Config]
@@ -40,6 +42,10 @@ def build_path_from_import(module_import: str, root_path: Path) -> Path:
     return Path(f"{root_path}/{module_path}")
 
 
+def build_module_from_path(path: Path, root_path: Path) -> str:
+    return str(path.relative_to(root_path)).replace("/", ".").replace(".py", "")
+
+
 def get_package_config(
     directory_path: Path, root_path: Path, config_lookup: ConfigLookup
 ) -> Config | None:
@@ -58,6 +64,9 @@ def get_package_config(
     config = Config(
         allowed_import_modules=json_config.get("allowed_import_modules"),
         allowed_export_modules=json_config.get("allowed_export_modules"),
+        bypass_export_check_for_modules=json_config.get(
+            "bypass_export_check_for_modules", []
+        ),
         path=str(potential_embargo_file),
     )
     config_lookup[str(potential_embargo_file)] = config
@@ -144,16 +153,24 @@ def build_allowed_modules_tree(config: Config, mode: ModuleTreeBuildingMode) -> 
         }
     """
     tree: dict[str, dict] = {}
-    config_modules = (
-        config.allowed_import_modules
-        if mode == ModuleTreeBuildingMode.IMPORT
-        else config.allowed_export_modules
-    )
+    match mode:
+        case ModuleTreeBuildingMode.BYPASS:
+            config_modules = config.bypass_export_check_for_modules
+        case ModuleTreeBuildingMode.IMPORT:
+            config_modules = config.allowed_import_modules  # type: ignore
+        case _:
+            config_modules = config.allowed_export_modules  # type: ignore
     for allowed_import in config_modules:
         current_dict = tree
         for s in allowed_import.split("."):
             current_dict = current_dict.setdefault(s, {})
     return tree
+
+
+def can_bypass_check(imported_from: str, bypass_modules_tree: dict[str, dict]) -> bool:
+    return is_operation_allowed(
+        imported_module=imported_from, allowed_modules_tree=bypass_modules_tree
+    )
 
 
 def is_operation_allowed(
@@ -255,7 +272,17 @@ def check_for_allowed_exports(
     allowed_modules_tree = build_allowed_modules_tree(
         config=config, mode=ModuleTreeBuildingMode.EXPORT
     )
+    bypass_modules_tree = build_allowed_modules_tree(
+        config=config, mode=ModuleTreeBuildingMode.BYPASS
+    )
     if node.module is None:
+        return []
+    if can_bypass_check(
+        imported_from=build_module_from_path(
+            path=importing_file, root_path=app_root_path
+        ),
+        bypass_modules_tree=bypass_modules_tree,
+    ):
         return []
     if is_operation_allowed(node.module, allowed_modules_tree) is True:
         return []
@@ -276,7 +303,7 @@ def check_for_violations(
     export_violations: list[str] = []
     if not str(filename).endswith(".py"):
         print(f"Not checking file {filename}")
-        return []
+        return [], []
 
     import_nodes = get_import_nodes(str(filename))
     local_import_nodes = get_local_import_nodes(import_nodes, local_packages_tree)
@@ -316,10 +343,6 @@ def main(argv: list[str] | None = None):
         "Must be relative to the cwd path of execution of this script. Default value is current working directory. Example: --app-root=src",
     )
     args = parser.parse_args(argv)
-
-    if args.app_root is None:
-        print("--app-root argument must be set")
-        exit(-1)
 
     if not Path(args.app_root).exists():
         print(
