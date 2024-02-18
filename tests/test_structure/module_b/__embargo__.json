@@ -1,0 +1,3 @@
+{
+  "allowed_import_modules": ["tests.test_structure.module_a"]
+}

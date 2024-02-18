@@ -23,7 +23,6 @@ def get_import_nodes(filename: str) -> list[ast.ImportFrom]:
 
 def get_package_config(directory_path: Path, root_path: Path) -> Config | None:
     potential_embargo_file = Path(f"{directory_path}/__embargo__.json")
-
     if not potential_embargo_file.exists():
         if directory_path == root_path:
             return None
@@ -40,7 +39,7 @@ def get_package_config(directory_path: Path, root_path: Path) -> Config | None:
     )
 
 
-def get_package_tree(path: Path) -> dict:
+def get_package_tree(path: Path) -> tuple[dict[Path, dict | None], set[Path]]:
     """
     We want to recursively build a tree:
     {
@@ -52,8 +51,6 @@ def get_package_tree(path: Path) -> dict:
     if value of a key is None, then it means it's a file.
     """
     package_tree = {}
-    if not Path(f"{path}/__init__.py").exists():
-        return {}
 
     for item in path.iterdir():
         if item.name in IGNORE_LIST:
@@ -63,6 +60,20 @@ def get_package_tree(path: Path) -> dict:
         if item.is_dir() and "." not in item.name:
             package_tree[item.name] = get_package_tree(item)
     return package_tree
+
+
+def get_files_in_dir(path: Path) -> set[Path]:
+    files = set()
+
+    for item in path.iterdir():
+        if item.name in IGNORE_LIST:
+            continue
+        if item.is_file() and item.name.endswith(".py"):
+            files.add(item)
+        if item.is_dir() and "." not in item.name:
+            new_files = get_files_in_dir(item)
+            files = files.union(new_files)
+    return files
 
 
 def get_local_import_nodes(
@@ -138,10 +149,48 @@ def is_import_allowed(imported_module: str, allowed_modules_tree: dict) -> bool:
     return True
 
 
+def get_filenames_to_check(filenames: list[str], app_root_path) -> list[Path]:
+    all_files: list[Path] = []
+    for filename in filenames:
+        path = Path(f"{app_root_path}/{filename}")
+        if path.is_dir():
+            found_files = get_files_in_dir(path)
+            all_files += found_files
+        if path.is_file():
+            all_files.append(Path(path))
+    return all_files
+
+
+def check_for_violations(
+    filename: Path, app_root_path: Path, local_packages_tree: dict
+) -> list[str]:
+    violations = []
+    if not str(filename).endswith(".py"):
+        print(f"Not checking file {filename}")
+        return []
+    config = get_package_config(directory_path=filename.parent, root_path=app_root_path)
+    if config is None:
+        return []
+    import_nodes = get_import_nodes(filename)
+    local_import_nodes = get_local_import_nodes(import_nodes, local_packages_tree)
+    allowed_modules_tree = build_allowed_modules_tree(config)
+    has_violated = False
+    for node in local_import_nodes:
+        if is_import_allowed(node.module, allowed_modules_tree) is True:
+            continue
+        has_violated = True
+        violations.append(f"{filename}: {node.module}")
+    if has_violated is True:
+        violations.append(f"Allowed imports: {config.allowed_import_modules}")
+        violations.append(f"Config file: {config.path}")
+        violations.append("")
+    return violations
+
+
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument("filenames", nargs="*")
-    parser.add_argument("--app-root", dest="app_root")
+    parser.add_argument("--app-root", dest="app_root", default="")
     args = parser.parse_args(argv)
 
     if args.app_root is None:
@@ -154,38 +203,25 @@ def main(argv: list[str] | None = None):
         )
         exit(-1)
 
-    root_path = Path().cwd()
-    app_root_path = Path(f"{root_path}/{args.app_root}")
+    path_of_execution = Path().cwd()
+    app_root_path = Path(f"{path_of_execution}/{args.app_root}")
 
     packages_tree = get_package_tree(app_root_path)
+    filenames_to_check = get_filenames_to_check(
+        args.filenames, app_root_path=app_root_path
+    )
 
     violations: list[str] = []
 
-    for filename in args.filenames:
-        if not filename.endswith(".py"):
-            print(f"Not checking file {filename}")
-            continue
-        filename_path = Path(filename)
-        combined_path = f"{root_path}/{filename_path}"
-        config = get_package_config(Path(combined_path).parent, app_root_path)
-        if config is None:
-            continue
-        import_nodes = get_import_nodes(filename)
-        local_import_nodes = get_local_import_nodes(import_nodes, packages_tree)
-        allowed_modules_tree = build_allowed_modules_tree(config)
-        has_violated = False
-        for node in local_import_nodes:
-            if is_import_allowed(node.module, allowed_modules_tree) is True:
-                continue
-            has_violated = True
-            violations.append(f"{filename}: {node.module}")
-        if has_violated is True:
-            violations.append(f"Allowed imports: {config.allowed_import_modules}")
-            violations.append(f"Config file: {config.path}")
-            violations.append("")
+    for file in filenames_to_check:
+        violations += check_for_violations(
+            filename=file,
+            app_root_path=app_root_path,
+            local_packages_tree=packages_tree,
+        )
+
     if len(violations) > 0:
         print(" ❌ Import violations detected\n")
         for violation in violations:
             print(violation)
         exit(-1)
-    exit(0)
