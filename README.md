@@ -1,5 +1,7 @@
 # Import embargo - check your cross app imports
 
+WARNING: This is stil a WIP project. Contributors welcome.
+
 Import embargo is a tool for python applications which can check the imports across your local
 packages/modules.
 
