@@ -10,6 +10,7 @@ IGNORE_LIST = {"__pycache__", ".mypy_cache", ".DS_Store", ".ruff_cache"}
 @dataclasses.dataclass
 class Config:
     allowed_import_modules: list[str]
+    allowed_export_modules: list[str]
     path: str
 
 
@@ -21,22 +22,28 @@ def get_import_nodes(filename: str) -> list[ast.ImportFrom]:
     return [node for node in tree.body if isinstance(node, ast.ImportFrom)]
 
 
-def get_package_config(directory_path: Path, root_path: Path) -> Config | None:
+def get_package_config(
+    directory_path: Path, root_path: Path, config_lookup: dict[str, Config]
+) -> Config | None:
     potential_embargo_file = Path(f"{directory_path}/__embargo__.json")
+
+    cached_config = config_lookup.get(potential_embargo_file)
+    if cached_config is not None:
+        return cached_config
+
     if not potential_embargo_file.exists():
         if directory_path == root_path:
             return None
-        return get_package_config(directory_path.parent, root_path)
+        return get_package_config(directory_path.parent, root_path, config_lookup)
 
     json_config = json.loads(potential_embargo_file.read_text())
-    if "allowed_import_modules" not in json_config:
-        raise ValueError(
-            "'allowed_import_modules' key must be present in __embargo__.json"
-        )
-    return Config(
-        allowed_import_modules=json_config["allowed_import_modules"],
+    config = Config(
+        allowed_import_modules=json_config.get("allowed_import_modules", []),
+        allowed_export_modules=json_config.get("allowed_export_modules", []),
         path=str(potential_embargo_file),
     )
+    config_lookup[potential_embargo_file] = config
+    return config
 
 
 def get_package_tree(path: Path) -> tuple[dict[Path, dict | None], set[Path]]:
@@ -162,13 +169,20 @@ def get_filenames_to_check(filenames: list[str], app_root_path) -> list[Path]:
 
 
 def check_for_violations(
-    filename: Path, app_root_path: Path, local_packages_tree: dict
+    filename: Path,
+    app_root_path: Path,
+    local_packages_tree: dict,
+    config_lookup: dict[str, Config],
 ) -> list[str]:
     violations = []
     if not str(filename).endswith(".py"):
         print(f"Not checking file {filename}")
         return []
-    config = get_package_config(directory_path=filename.parent, root_path=app_root_path)
+    config = get_package_config(
+        directory_path=filename.parent,
+        root_path=app_root_path,
+        config_lookup=config_lookup,
+    )
     if config is None:
         return []
     import_nodes = get_import_nodes(filename)
@@ -212,12 +226,14 @@ def main(argv: list[str] | None = None):
     )
 
     violations: list[str] = []
+    config_lookup = {}
 
     for file in filenames_to_check:
         violations += check_for_violations(
             filename=file,
             app_root_path=app_root_path,
             local_packages_tree=packages_tree,
+            config_lookup=config_lookup,
         )
 
     if len(violations) > 0:

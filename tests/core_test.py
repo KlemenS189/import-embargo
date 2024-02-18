@@ -41,6 +41,7 @@ def test_build_allowed_modules_tree():
             "x.y",
         ],
         path="/test/test",
+        allowed_export_modules=[],
     )
     assert build_allowed_modules_tree(config) == {
         "a": {"b": {"c": {}}, "d": {"e": {}, "f": {}}},
@@ -56,6 +57,7 @@ def test_get_package_config():
             f"{root_path}/tests/test_structure/module_c/hello.py"
         ).parent,
         root_path=root_path.cwd(),
+        config_lookup={},
     )
     assert config is not None
     assert config.allowed_import_modules == []
@@ -65,21 +67,10 @@ def test_get_package_config():
             f"{root_path}/tests/test_structure/module_a/submodule_a/service.py"
         ).parent,
         root_path=root_path.cwd(),
+        config_lookup={},
     )
     assert config is not None
     assert config.allowed_import_modules == []
-
-
-def test_get_package_config_invalid():
-    root_path = Path(".").cwd()
-
-    with pytest.raises(ValueError):
-        get_package_config(
-            directory_path=Path(
-                f"{root_path}/tests/test_structure/module_d/__init__.py"
-            ).parent,
-            root_path=root_path.cwd(),
-        )
 
 
 def test_get_package_tree():
