@@ -5,9 +5,10 @@ description = "Tool for limiting python imports to different packages and report
 authors = ["Klemen Štrajhar <klemen.strajhar@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+keywords = ["automation", "lint", "imports", "ast"]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.10"
 
 
 [tool.poetry.group.dev.dependencies]
