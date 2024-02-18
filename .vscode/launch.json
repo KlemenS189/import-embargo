@@ -30,6 +30,15 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": ["tests/test_structure/module_b"]
+        },
+        {
+            "name": "Python Debugger: Run service_with_bad_export to check export",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": ["tests/test_structure/module_d/service_with_bad_import.py"]
         }
     ]
 }

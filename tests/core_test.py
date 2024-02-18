@@ -4,6 +4,7 @@ import pytest
 
 from import_embargo.core import (
     Config,
+    ModuleTreeBuildingMode,
     get_filenames_to_check,
     get_files_in_dir,
     get_import_nodes,
@@ -11,7 +12,7 @@ from import_embargo.core import (
     main,
 )
 from import_embargo.core import build_allowed_modules_tree
-from import_embargo.core import is_import_allowed
+from import_embargo.core import is_operation_allowed
 from import_embargo.core import get_package_config
 
 
@@ -23,9 +24,9 @@ from import_embargo.core import get_package_config
         ("a.c", {"a": {"b": {}}}, False),
     ),
 )
-def test_is_import_allowed(imported_module, allowed_modules_tree, result):
+def test_is_operation_allowed(imported_module, allowed_modules_tree, result):
     assert (
-        is_import_allowed(
+        is_operation_allowed(
             imported_module=imported_module, allowed_modules_tree=allowed_modules_tree
         )
         is result
@@ -43,10 +44,11 @@ def test_build_allowed_modules_tree():
         path="/test/test",
         allowed_export_modules=[],
     )
-    assert build_allowed_modules_tree(config) == {
+    assert build_allowed_modules_tree(config, mode=ModuleTreeBuildingMode.IMPORT) == {
         "a": {"b": {"c": {}}, "d": {"e": {}, "f": {}}},
         "x": {"y": {}},
     }
+    assert build_allowed_modules_tree(config, mode=ModuleTreeBuildingMode.EXPORT) == {}
 
 
 def test_get_package_config():
@@ -86,7 +88,13 @@ def test_get_package_tree():
         },
         "module_b": {"__init__.py": None, "service.py": None},
         "module_c": {"__init__.py": None, "hello.py": None},
-        "module_d": {"__init__.py": None},
+        "module_d": {
+            "__init__.py": None,
+            "service.py": None,
+            "service_with_bad_import.py": None,
+        },
+        "module_e": {"__init__.py": None, "private_service.py": None},
+        "module_f": {"__init__.py": None, "public_service.py": None},
     }
 
 
@@ -152,10 +160,10 @@ def test_get_filenames_to_check():
     assert len(filenames) == 4
 
     filenames = get_filenames_to_check(app_root_path=root_path, filenames=["tests"])
-    assert len(filenames) == 12
+    assert len(filenames) == 18
 
 
-def test_main_with_fail():
+def test_main_with_fail_import():
     args = [
         "tests/test_structure/module_a",
         "tests/test_structure/module_b",
@@ -166,8 +174,19 @@ def test_main_with_fail():
         assert err.value.code == -1
 
 
+def test_main_with_fail_export():
+    args = [
+        "tests/test_structure/module_d/service_with_bad_import.py",
+    ]
+
+    with pytest.raises(SystemExit) as err:
+        main(args)
+        assert err.value.code == -1
+
+
 def test_main_happy_path():
     args = [
         "tests/test_structure/module_b",
+        "tests/test_structure/module_d/service.py",
     ]
     main(args)

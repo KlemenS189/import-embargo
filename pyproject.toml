@@ -10,11 +10,12 @@ keywords = ["automation", "lint", "imports", "ast"]
 [tool.poetry.dependencies]
 python = ">=3.10"
 
-
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
 pytest-cov = "^4.1.0"
 black = "^24.2.0"
+ruff = "^0.2.2"
+mypy = "^1.8.0"
 
 [build-system]
 requires = ["poetry-core"]

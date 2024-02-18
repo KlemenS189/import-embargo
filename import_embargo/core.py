@@ -1,17 +1,27 @@
 import argparse
 import ast
 import dataclasses
+import enum
 import json
 from pathlib import Path
+from typing import TypeAlias
 
 IGNORE_LIST = {"__pycache__", ".mypy_cache", ".DS_Store", ".ruff_cache"}
 
 
 @dataclasses.dataclass
 class Config:
-    allowed_import_modules: list[str]
-    allowed_export_modules: list[str]
+    allowed_import_modules: list[str] | None
+    allowed_export_modules: list[str] | None
     path: str
+
+
+class ModuleTreeBuildingMode(enum.Enum):
+    IMPORT = "IMPORT"
+    EXPORT = "EXPORT"
+
+
+ConfigLookup: TypeAlias = dict[str, Config]
 
 
 def get_import_nodes(filename: str) -> list[ast.ImportFrom]:
@@ -22,12 +32,20 @@ def get_import_nodes(filename: str) -> list[ast.ImportFrom]:
     return [node for node in tree.body if isinstance(node, ast.ImportFrom)]
 
 
+def build_path_from_import(module_import: str, root_path: Path) -> Path:
+    """
+    Build an absolute path to a file based on a app root path and module import.
+    """
+    module_path = Path(module_import.replace(".", "/"))
+    return Path(f"{root_path}/{module_path}")
+
+
 def get_package_config(
-    directory_path: Path, root_path: Path, config_lookup: dict[str, Config]
+    directory_path: Path, root_path: Path, config_lookup: ConfigLookup
 ) -> Config | None:
     potential_embargo_file = Path(f"{directory_path}/__embargo__.json")
 
-    cached_config = config_lookup.get(potential_embargo_file)
+    cached_config = config_lookup.get(str(potential_embargo_file))
     if cached_config is not None:
         return cached_config
 
@@ -38,15 +56,15 @@ def get_package_config(
 
     json_config = json.loads(potential_embargo_file.read_text())
     config = Config(
-        allowed_import_modules=json_config.get("allowed_import_modules", []),
-        allowed_export_modules=json_config.get("allowed_export_modules", []),
+        allowed_import_modules=json_config.get("allowed_import_modules"),
+        allowed_export_modules=json_config.get("allowed_export_modules"),
         path=str(potential_embargo_file),
     )
-    config_lookup[potential_embargo_file] = config
+    config_lookup[str(potential_embargo_file)] = config
     return config
 
 
-def get_package_tree(path: Path) -> tuple[dict[Path, dict | None], set[Path]]:
+def get_package_tree(path: Path) -> dict[str, dict | None]:
     """
     We want to recursively build a tree:
     {
@@ -57,7 +75,7 @@ def get_package_tree(path: Path) -> tuple[dict[Path, dict | None], set[Path]]:
     }
     if value of a key is None, then it means it's a file.
     """
-    package_tree = {}
+    package_tree: dict[str, dict | None] = {}
 
     for item in path.iterdir():
         if item.name in IGNORE_LIST:
@@ -91,14 +109,17 @@ def get_local_import_nodes(
     """
     local_import_nodes = []
     for node in import_nodes:
-        module_path = node.module.split(".")
+        module = node.module
+        if module is None:
+            continue
+        module_path = module.split(".")
         first_package = module_path[0]
         if first_package in local_package_tree:
             local_import_nodes.append(node)
     return local_import_nodes
 
 
-def build_allowed_modules_tree(config: Config) -> dict:
+def build_allowed_modules_tree(config: Config, mode: ModuleTreeBuildingMode) -> dict:
     """
     Example:
         allowed_import_packages=[
@@ -122,15 +143,22 @@ def build_allowed_modules_tree(config: Config) -> dict:
             }
         }
     """
-    tree = {}
-    for allowed_import in config.allowed_import_modules:
+    tree: dict[str, dict] = {}
+    config_modules = (
+        config.allowed_import_modules
+        if mode == ModuleTreeBuildingMode.IMPORT
+        else config.allowed_export_modules
+    )
+    for allowed_import in config_modules:
         current_dict = tree
         for s in allowed_import.split("."):
             current_dict = current_dict.setdefault(s, {})
     return tree
 
 
-def is_import_allowed(imported_module: str, allowed_modules_tree: dict) -> bool:
+def is_operation_allowed(
+    imported_module: str, allowed_modules_tree: dict[str, dict]
+) -> bool:
     """
     Determines if imported module is allowed.
 
@@ -146,9 +174,9 @@ def is_import_allowed(imported_module: str, allowed_modules_tree: dict) -> bool:
     the import will reported as violation as it has diverged from the 'a.c' path.
     """
     splitted_module_name = imported_module.split(".")
-    current_dict = allowed_modules_tree
+    current_dict: dict[str, dict] | None = allowed_modules_tree
     for name in splitted_module_name:
-        current_dict = current_dict.get(name)
+        current_dict = current_dict.get(name)  # type: ignore
         if current_dict is None:
             return False
         if current_dict == {}:
@@ -168,43 +196,125 @@ def get_filenames_to_check(filenames: list[str], app_root_path) -> list[Path]:
     return all_files
 
 
-def check_for_violations(
+def check_for_allowed_imports(
     filename: Path,
     app_root_path: Path,
-    local_packages_tree: dict,
-    config_lookup: dict[str, Config],
+    config_lookup: ConfigLookup,
+    node: ast.ImportFrom,
 ) -> list[str]:
-    violations = []
-    if not str(filename).endswith(".py"):
-        print(f"Not checking file {filename}")
-        return []
+    """
+    Checks if module X.py can import any other module.
+    """
+
+    violations: list[str] = []
     config = get_package_config(
         directory_path=filename.parent,
         root_path=app_root_path,
         config_lookup=config_lookup,
     )
-    if config is None:
+    if config is None or config.allowed_import_modules is None:
         return []
-    import_nodes = get_import_nodes(filename)
-    local_import_nodes = get_local_import_nodes(import_nodes, local_packages_tree)
-    allowed_modules_tree = build_allowed_modules_tree(config)
-    has_violated = False
-    for node in local_import_nodes:
-        if is_import_allowed(node.module, allowed_modules_tree) is True:
-            continue
-        has_violated = True
-        violations.append(f"{filename}: {node.module}")
-    if has_violated is True:
-        violations.append(f"Allowed imports: {config.allowed_import_modules}")
-        violations.append(f"Config file: {config.path}")
-        violations.append("")
+
+    allowed_modules_tree = build_allowed_modules_tree(
+        config=config, mode=ModuleTreeBuildingMode.IMPORT
+    )
+    if node.module is None:
+        return []
+    if is_operation_allowed(node.module, allowed_modules_tree) is True:
+        return []
+
+    violations.append(f"{filename}: {node.module}")
+    violations.append(f"Allowed imports: {config.allowed_import_modules}")
+    violations.append(f"Config file: {config.path}\n")
     return violations
+
+
+def check_for_allowed_exports(
+    importing_file: Path,
+    app_root_path: Path,
+    config_lookup: ConfigLookup,
+    node: ast.ImportFrom,
+) -> list[str]:
+    """
+    Checks if module X.py can be imported from other modules.
+    """
+
+    violations: list[str] = []
+
+    path_of_imported_module = build_path_from_import(
+        module_import=node.module or "", root_path=app_root_path
+    )
+    config = get_package_config(
+        directory_path=path_of_imported_module.parent,
+        root_path=app_root_path,
+        config_lookup=config_lookup,
+    )
+    if config is None or config.allowed_export_modules is None:
+        return []
+
+    allowed_modules_tree = build_allowed_modules_tree(
+        config=config, mode=ModuleTreeBuildingMode.EXPORT
+    )
+    if node.module is None:
+        return []
+    if is_operation_allowed(node.module, allowed_modules_tree) is True:
+        return []
+
+    violations.append(f"{importing_file}: {node.module}")
+    violations.append(f"Allowed exports: {config.allowed_export_modules}")
+    violations.append(f"Config file: {config.path}\n")
+    return violations
+
+
+def check_for_violations(
+    filename: Path,
+    app_root_path: Path,
+    local_packages_tree: dict,
+    config_lookup: dict[str, Config],
+) -> tuple[list[str], list[str]]:
+    import_violations: list[str] = []
+    export_violations: list[str] = []
+    if not str(filename).endswith(".py"):
+        print(f"Not checking file {filename}")
+        return []
+
+    import_nodes = get_import_nodes(str(filename))
+    local_import_nodes = get_local_import_nodes(import_nodes, local_packages_tree)
+
+    for node in local_import_nodes:
+        #
+        # Check for allowed imports
+        #
+        import_violations += check_for_allowed_imports(
+            app_root_path=app_root_path,
+            filename=filename,
+            config_lookup=config_lookup,
+            node=node,
+        )
+
+        #
+        # Check for allowed exports
+        #
+        export_violations += check_for_allowed_exports(
+            app_root_path=app_root_path,
+            importing_file=filename,
+            config_lookup=config_lookup,
+            node=node,
+        )
+
+    return import_violations, export_violations
 
 
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument("filenames", nargs="*")
-    parser.add_argument("--app-root", dest="app_root", default="")
+    parser.add_argument(
+        "--app-root",
+        dest="app_root",
+        default="",
+        help="Defines the root directory where your python application lives. "
+        "Must be relative to the cwd path of execution of this script. Default value is current working directory. Example: --app-root=src",
+    )
     args = parser.parse_args(argv)
 
     if args.app_root is None:
@@ -225,19 +335,29 @@ def main(argv: list[str] | None = None):
         args.filenames, app_root_path=app_root_path
     )
 
-    violations: list[str] = []
-    config_lookup = {}
+    import_violations: list[str] = []
+    export_violations: list[str] = []
+    config_lookup: dict[str, Config] = {}
 
     for file in filenames_to_check:
-        violations += check_for_violations(
+        imp_violations, exp_violations = check_for_violations(
             filename=file,
             app_root_path=app_root_path,
             local_packages_tree=packages_tree,
             config_lookup=config_lookup,
         )
+        import_violations += imp_violations
+        export_violations += exp_violations
 
-    if len(violations) > 0:
+    if len(import_violations) > 0:
         print(" ❌ Import violations detected\n")
-        for violation in violations:
+        for violation in import_violations:
             print(violation)
+
+    if len(export_violations) > 0:
+        print(" ❌ Export violations detected\n")
+        for violation in export_violations:
+            print(violation)
+
+    if len(import_violations) + len(export_violations) > 0:
         exit(-1)
