@@ -22,7 +22,20 @@ If you strive for **Domain Driven Development**, this package can mark your pack
 
 - Only imports with absolute paths can be checked.
 
-## How to:
+## Usage:
+
+Output of --help
+
+```
+usage: main.py [-h] [--app-root APP_ROOT] [filenames ...]
+
+positional arguments:
+  filenames            List of files or directories. Example: src/module_a src/module_b
+
+options:
+  -h, --help           show this help message and exit
+  --app-root APP_ROOT  Defines the root directory where your python application lives. Must be relative to the cwd path of execution of this script. Default value is current working directory. Example: --app-root=src_folder
+```
 
 ### Config file
 
@@ -32,7 +45,8 @@ Example config:
 ```json
 {
   "allowed_export_modules": ["your_module_x.submodule"],
-  "allowed_import_modules": ["your_submodule_y"]
+  "allowed_import_modules": ["your_submodule_y"],
+  "bypass_export_check_for_modules": []
 }
 ```
 
@@ -43,6 +57,10 @@ Module definitions in the key `allowed_export_modules` mean which modules can be
 #### `allowed_import_modules`
 
 Module definitions in the key `allowed_import_modules` mean which modules can be imported from the checked module.
+
+#### `bypass_export_check_for_modules`
+
+Module definition in the key `bypass_export_check_for_modules` mean which modules can bypass the export check.
 
 If any key is an empty list, nothing is allowed. If the key is missing, check for import/export will be skipped.
 
@@ -94,6 +112,21 @@ Allowed exports: [payments.payment_service]
 Config file: /home/user/python_app_root/orders/__embargo__.json
 ```
 
+#### Importing inside of a module
+
+With the example config above, you would limit the exporting to `payments.payment_service.py`. But in the case where `payments.payment_service.py` would import and call some function or method from `payments.bank.private_banking_services`, the export check would fail, because `payments.bank.private_banking_services` is not exported.
+
+To bypass inter module importing, you can use the config key `bypass_export_check_for_modules`.
+
+```json
+{
+  "allowed_export_modules": ["payments.payment_service.py"],
+  "bypass_export_check_for_modules": ["payments"]
+}
+```
+
+With this config, any inter imports (`payments.payment_service` importing `payments.bank.private_banking_services`) are allowed.
+
 #### Config hierarchy
 
 If something is being imported, `import-embargo` is going to check for `__embargo__.json` on the level of imported module. If config does not exist, it will be searched for in upper directory levels all until the specified python application root.
@@ -101,3 +134,7 @@ If something is being imported, `import-embargo` is going to check for `__embarg
 This feature allows you to create an `__embargo__.json` file on one level and all subdirectories will automatically be protected.
 
 In other words. When searching for config file, the first found config file will be used for checking.
+
+#### Will all of my imports fail if I start using `import-embargo` tool?
+
+No. You can add `__embargo__.json` files incrementaly. If config file does not exist, all of the checks will be skipped.

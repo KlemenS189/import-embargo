@@ -100,6 +100,7 @@ def test_get_package_tree():
             "public_service.py": None,
             "private_service.py": None,
             "private_submodule_f": {"__init__.py": None, "utils.py": None},
+            "private_submodule_f_2": {"__init__.py": None, "utils.py": None},
         },
     }
 
@@ -166,7 +167,7 @@ def test_get_filenames_to_check():
     assert len(filenames) == 4
 
     filenames = get_filenames_to_check(app_root_path=root_path, filenames=["tests"])
-    assert len(filenames) == 21
+    assert len(filenames) == 23
 
 
 def test_main_with_fail_import():

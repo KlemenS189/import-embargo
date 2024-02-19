@@ -334,7 +334,11 @@ def check_for_violations(
 
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("filenames", nargs="*")
+    parser.add_argument(
+        "filenames",
+        nargs="*",
+        help="List of files or directories. Example: src/module_a src/module_b",
+    )
     parser.add_argument(
         "--app-root",
         dest="app_root",
