@@ -6,9 +6,7 @@ from import_embargo.core import (
     Config,
     ModuleTreeBuildingMode,
     get_filenames_to_check,
-    get_files_in_dir,
     get_import_nodes,
-    get_package_tree,
     main,
 )
 from import_embargo.core import build_allowed_modules_tree
@@ -35,16 +33,18 @@ def test_is_operation_allowed(imported_module, allowed_modules_tree, result):
 
 def test_build_allowed_modules_tree():
     config = Config(
-        allowed_import_modules=[
-            "a.b.c",
-            "a.d.e",
-            "a.d.f",
-            "x.y",
-        ],
+        setting={},
         path="/test/test",
-        allowed_export_modules=[],
-        bypass_export_check_for_modules=[],
     )
+    config.setting[ModuleTreeBuildingMode.IMPORT] = [
+        "a.b.c",
+        "a.d.e",
+        "a.d.f",
+        "x.y",
+    ]
+    config.setting[ModuleTreeBuildingMode.EXPORT] = []
+    config.setting[ModuleTreeBuildingMode.BYPASS] = []
+
     assert build_allowed_modules_tree(config, mode=ModuleTreeBuildingMode.IMPORT) == {
         "a": {"b": {"c": {}}, "d": {"e": {}, "f": {}}},
         "x": {"y": {}},
@@ -59,50 +59,21 @@ def test_get_package_config():
         directory_path=Path(
             f"{root_path}/tests/test_structure/module_c/hello.py"
         ).parent,
-        root_path=root_path.cwd(),
         config_lookup={},
+        root_path=root_path.cwd(),
     )
     assert config is not None
-    assert config.allowed_import_modules == []
+    assert config.setting[ModuleTreeBuildingMode.IMPORT] == []
 
     config = get_package_config(
         directory_path=Path(
             f"{root_path}/tests/test_structure/module_a/submodule_a/service.py"
         ).parent,
-        root_path=root_path.cwd(),
         config_lookup={},
+        root_path=root_path.cwd(),
     )
     assert config is not None
-    assert config.allowed_import_modules == []
-
-
-def test_get_package_tree():
-    root_path = Path(".").cwd()
-    app_root_path = Path(f"{root_path}/tests/test_structure")
-    package_tree = get_package_tree(app_root_path)
-    assert package_tree == {
-        "__init__.py": None,
-        "module_a": {
-            "__init__.py": None,
-            "service.py": None,
-            "submodule_a": {"__init__.py": None, "service.py": None},
-        },
-        "module_b": {"__init__.py": None, "service.py": None},
-        "module_c": {"__init__.py": None, "hello.py": None},
-        "module_d": {
-            "__init__.py": None,
-            "service.py": None,
-            "service_with_bad_import.py": None,
-        },
-        "module_e": {"__init__.py": None, "private_service.py": None},
-        "module_f": {
-            "__init__.py": None,
-            "public_service.py": None,
-            "private_service.py": None,
-            "private_submodule_f": {"__init__.py": None, "utils.py": None},
-            "private_submodule_f_2": {"__init__.py": None, "utils.py": None},
-        },
-    }
+    assert config.setting[ModuleTreeBuildingMode.IMPORT] == []
 
 
 def test_get_import_nodes():
@@ -121,27 +92,6 @@ def test_get_import_nodes():
     assert second_node.module == "tests.test_structure.module_a"
     children = second_node.names
     assert children[0].name == "service"
-
-
-def test_get_files_in_dir():
-    root_path = Path().cwd()
-    folder_path = Path(f"{root_path}/tests/test_structure/module_a")
-
-    files = get_files_in_dir(folder_path)
-
-    relative_to_root_files: set[str] = set()
-    for file in files:
-        relative_to_root_files.add(str(file.relative_to(root_path)))
-    assert len(relative_to_root_files) == 4
-    assert "tests/test_structure/module_a/__init__.py" in relative_to_root_files
-    assert "tests/test_structure/module_a/service.py" in relative_to_root_files
-    assert (
-        "tests/test_structure/module_a/submodule_a/service.py" in relative_to_root_files
-    )
-    assert (
-        "tests/test_structure/module_a/submodule_a/__init__.py"
-        in relative_to_root_files
-    )
 
 
 def test_get_filenames_to_check():
