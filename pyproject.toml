@@ -6,6 +6,22 @@ authors = ["Klemen Štrajhar <klemen.strajhar@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 keywords = ["automation", "lint", "imports", "ast"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Utilities",
+]
+include = [{ path = "LICENSE", format = "sdist" }]
+repository = "https://github.com/KlemenS189/import-embargo"
+homepage = "https://github.com/KlemenS189/import-embargo"
+
+[tool.poetry.scripts]
+import_embargo = "import_embargo.core:main"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
@@ -16,6 +32,7 @@ pytest-cov = "^4.1.0"
 black = "^24.2.0"
 ruff = "^0.2.2"
 mypy = "^1.8.0"
+isort = "^5.13.2"
 
 [build-system]
 requires = ["poetry-core"]
