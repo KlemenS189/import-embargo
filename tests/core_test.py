@@ -1,17 +1,17 @@
-from operator import le
 from pathlib import Path
+
 import pytest
 
 from import_embargo.core import (
     Config,
     ModuleTreeBuildingMode,
+    build_allowed_modules_tree,
     get_filenames_to_check,
     get_import_nodes,
+    get_package_config,
+    is_operation_allowed,
     main,
 )
-from import_embargo.core import build_allowed_modules_tree
-from import_embargo.core import is_operation_allowed
-from import_embargo.core import get_package_config
 
 
 @pytest.mark.parametrize(
@@ -83,15 +83,15 @@ def test_get_import_nodes():
     assert result is not None
     assert len(result) == 3
     first_node = result[0]
-    assert first_node.module == "tests.test_structure.module_a.service"
+    assert first_node.module == "tests.test_structure.module_a"
     children = first_node.names
     assert len(children) == 1
-    assert children[0].name == "is_weather_nice_today"
+    assert children[0].name == "service"
 
     second_node = result[1]
-    assert second_node.module == "tests.test_structure.module_a"
+    assert second_node.module == "tests.test_structure.module_a.service"
     children = second_node.names
-    assert children[0].name == "service"
+    assert children[0].name == "is_weather_nice_today"
 
 
 def test_get_filenames_to_check():

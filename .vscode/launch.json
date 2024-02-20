@@ -48,6 +48,6 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": ["tests/test_structure/module_f"]
-        }        
+        }
     ]
 }
