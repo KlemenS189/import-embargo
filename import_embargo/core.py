@@ -9,18 +9,16 @@ from typing import TypeAlias
 IGNORE_LIST = {"__pycache__", ".mypy_cache", ".DS_Store", ".ruff_cache"}
 
 
-@dataclasses.dataclass
-class Config:
-    allowed_import_modules: list[str] | None
-    allowed_export_modules: list[str] | None
-    bypass_export_check_for_modules: list[str]
-    path: str
-
-
 class ModuleTreeBuildingMode(enum.Enum):
     IMPORT = "IMPORT"
     EXPORT = "EXPORT"
     BYPASS = "BYPASS"
+
+
+@dataclasses.dataclass
+class Config:
+    setting: dict[ModuleTreeBuildingMode, list[str] | None]
+    path: str
 
 
 ConfigLookup: TypeAlias = dict[str, Config]
@@ -39,7 +37,7 @@ def build_path_from_import(module_import: str, root_path: Path) -> Path:
     Build an absolute path to a file based on a app root path and module import.
     """
     module_path = Path(module_import.replace(".", "/"))
-    return Path(f"{root_path}/{module_path}")
+    return root_path / module_path
 
 
 def build_module_from_path(path: Path, root_path: Path) -> str:
@@ -49,7 +47,7 @@ def build_module_from_path(path: Path, root_path: Path) -> str:
 def get_package_config(
     directory_path: Path, root_path: Path, config_lookup: ConfigLookup
 ) -> Config | None:
-    potential_embargo_file = Path(f"{directory_path}/__embargo__.json")
+    potential_embargo_file = Path(directory_path) / Path("__embargo__.json")
 
     cached_config = config_lookup.get(str(potential_embargo_file))
     if cached_config is not None:
@@ -62,73 +60,35 @@ def get_package_config(
 
     json_config = json.loads(potential_embargo_file.read_text())
     config = Config(
-        allowed_import_modules=json_config.get("allowed_import_modules"),
-        allowed_export_modules=json_config.get("allowed_export_modules"),
-        bypass_export_check_for_modules=json_config.get(
-            "bypass_export_check_for_modules", []
-        ),
         path=str(potential_embargo_file),
+        setting={},
     )
+    for which, name in [
+        (ModuleTreeBuildingMode.IMPORT, "allowed_import_modules"),
+        (ModuleTreeBuildingMode.EXPORT, "allowed_export_modules"),
+        (ModuleTreeBuildingMode.BYPASS, "bypass_export_check_for_modules"),
+    ]:
+        config.setting[which] = json_config.get(name)
     config_lookup[str(potential_embargo_file)] = config
     return config
 
 
-def get_package_tree(path: Path) -> dict[str, dict | None]:
-    """
-    We want to recursively build a tree:
-    {
-        "dir_a": {
-            "file.py": None
-        },
-        "dir_b": {}
-    }
-    if value of a key is None, then it means it's a file.
-    """
-    package_tree: dict[str, dict | None] = {}
-
-    for item in path.iterdir():
-        if item.name in IGNORE_LIST:
-            continue
-        if item.is_file() and item.name.endswith(".py"):
-            package_tree[item.name] = None
-        if item.is_dir() and "." not in item.name:
-            package_tree[item.name] = get_package_tree(item)
-    return package_tree
-
-
-def get_files_in_dir(path: Path) -> set[Path]:
-    files = set()
-
-    for item in path.iterdir():
-        if item.name in IGNORE_LIST:
-            continue
-        if item.is_file() and item.name.endswith(".py"):
-            files.add(item)
-        if item.is_dir() and "." not in item.name:
-            new_files = get_files_in_dir(item)
-            files = files.union(new_files)
-    return files
-
-
-def get_local_import_nodes(
-    import_nodes: list[ast.ImportFrom], local_package_tree: dict
-) -> list[ast.ImportFrom]:
+def is_local_import(module_import: ast.ImportFrom) -> bool:
     """
     Determines if import is local or from third party library
     """
-    local_import_nodes = []
-    for node in import_nodes:
-        module = node.module
-        if module is None:
-            continue
-        module_path = module.split(".")
-        first_package = module_path[0]
-        if first_package in local_package_tree:
-            local_import_nodes.append(node)
-    return local_import_nodes
+    module = module_import.module
+    if module is None:
+        return False
+    module_path = module.split(".")
+    first_package = module_path[0]
+
+    return Path(first_package).is_dir() or Path(first_package + ".py").exists()
 
 
-def build_allowed_modules_tree(config: Config, mode: ModuleTreeBuildingMode) -> dict:
+def build_allowed_modules_tree(
+    config: Config, mode: ModuleTreeBuildingMode
+) -> dict[str, dict]:
     """
     Example:
         allowed_import_packages=[
@@ -153,14 +113,9 @@ def build_allowed_modules_tree(config: Config, mode: ModuleTreeBuildingMode) -> 
         }
     """
     tree: dict[str, dict] = {}
-    match mode:
-        case ModuleTreeBuildingMode.BYPASS:
-            config_modules = config.bypass_export_check_for_modules
-        case ModuleTreeBuildingMode.IMPORT:
-            config_modules = config.allowed_import_modules  # type: ignore
-        case _:
-            config_modules = config.allowed_export_modules  # type: ignore
-    for allowed_import in config_modules:
+    allowed = config.setting[mode] or {}  # type: ignore [var-annotated]
+
+    for allowed_import in allowed:
         current_dict = tree
         for s in allowed_import.split("."):
             current_dict = current_dict.setdefault(s, {})
@@ -201,94 +156,77 @@ def is_operation_allowed(
     return True
 
 
-def get_filenames_to_check(filenames: list[str], app_root_path) -> list[Path]:
+def get_filenames_to_check(filenames: list[str], app_root_path: Path) -> list[Path]:
     all_files: list[Path] = []
     for filename in filenames:
-        path = Path(f"{app_root_path}/{filename}")
-        if path.is_dir():
-            found_files = get_files_in_dir(path)
-            all_files += found_files
+        path = app_root_path / Path(filename)
         if path.is_file():
-            all_files.append(Path(path))
+            all_files.append(path)
+        else:
+            for path in path.rglob("*.py"):
+                if not any(dir_name in IGNORE_LIST for dir_name in path.parts):
+                    all_files.append(path)
     return all_files
 
 
-def check_for_allowed_imports(
-    filename: Path,
+def check_for_allowed(
+    mode: ModuleTreeBuildingMode,
+    file: Path,
     app_root_path: Path,
     config_lookup: ConfigLookup,
     node: ast.ImportFrom,
 ) -> list[str]:
     """
-    Checks if module X.py can import any other module.
+    Checks whether module X.py can import any other module when mode is ModuleTreeBuildingMode.IMPORT
+    or whether module X.py can be imported from other modules when mode is ModuleTreeBuildingMode.EXPORT
     """
-
     violations: list[str] = []
+
+    if mode == ModuleTreeBuildingMode.EXPORT:
+        actual_path = build_path_from_import(
+            module_import=node.module or "", root_path=app_root_path
+        )
+    elif mode == ModuleTreeBuildingMode.IMPORT:
+        actual_path = file
+    else:
+        raise Exception("Invalid mode")
+
     config = get_package_config(
-        directory_path=filename.parent,
+        directory_path=actual_path.parent,
         root_path=app_root_path,
         config_lookup=config_lookup,
     )
-    if config is None or config.allowed_import_modules is None:
+    if config is None or config.setting[mode] is None:
         return []
 
-    allowed_modules_tree = build_allowed_modules_tree(
-        config=config, mode=ModuleTreeBuildingMode.IMPORT
-    )
+    allowed_modules_tree = build_allowed_modules_tree(config=config, mode=mode)
+
     if node.module is None:
         return []
-    if is_operation_allowed(node.module, allowed_modules_tree) is True:
+
+    if mode == ModuleTreeBuildingMode.EXPORT:
+        bypass_modules_tree = build_allowed_modules_tree(
+            config=config, mode=ModuleTreeBuildingMode.BYPASS
+        )
+        if can_bypass_check(
+            imported_from=build_module_from_path(path=file, root_path=app_root_path),
+            bypass_modules_tree=bypass_modules_tree,
+        ):
+            return []
+
+    if is_operation_allowed(node.module, allowed_modules_tree):
         return []
 
-    violations.append(f"{filename}: {node.module}")
-    violations.append(f"Allowed imports: {config.allowed_import_modules}")
-    violations.append(f"Config file: {config.path}\n")
-    return violations
+    violations.append(f"{file}: {node.module}")
+    if mode == ModuleTreeBuildingMode.EXPORT:
+        violations.append(
+            f"Allowed exports: {config.setting[ModuleTreeBuildingMode.EXPORT]}"
+        )
+    else:
+        violations.append(
+            f"Allowed imports: {config.setting[ModuleTreeBuildingMode.IMPORT]}"
+        )
 
-
-def check_for_allowed_exports(
-    importing_file: Path,
-    app_root_path: Path,
-    config_lookup: ConfigLookup,
-    node: ast.ImportFrom,
-) -> list[str]:
-    """
-    Checks if module X.py can be imported from other modules.
-    """
-
-    violations: list[str] = []
-
-    path_of_imported_module = build_path_from_import(
-        module_import=node.module or "", root_path=app_root_path
-    )
-    config = get_package_config(
-        directory_path=path_of_imported_module.parent,
-        root_path=app_root_path,
-        config_lookup=config_lookup,
-    )
-    if config is None or config.allowed_export_modules is None:
-        return []
-
-    allowed_modules_tree = build_allowed_modules_tree(
-        config=config, mode=ModuleTreeBuildingMode.EXPORT
-    )
-    bypass_modules_tree = build_allowed_modules_tree(
-        config=config, mode=ModuleTreeBuildingMode.BYPASS
-    )
-    if node.module is None:
-        return []
-    if can_bypass_check(
-        imported_from=build_module_from_path(
-            path=importing_file, root_path=app_root_path
-        ),
-        bypass_modules_tree=bypass_modules_tree,
-    ):
-        return []
-    if is_operation_allowed(node.module, allowed_modules_tree) is True:
-        return []
-
-    violations.append(f"{importing_file}: {node.module}")
-    violations.append(f"Allowed exports: {config.allowed_export_modules}")
     violations.append(f"Config file: {config.path}\n")
     return violations
 
@@ -296,7 +234,6 @@ def check_for_allowed_exports(
 def check_for_violations(
     filename: Path,
     app_root_path: Path,
-    local_packages_tree: dict,
     config_lookup: dict[str, Config],
 ) -> tuple[list[str], list[str]]:
     import_violations: list[str] = []
@@ -306,15 +243,16 @@ def check_for_violations(
         return [], []
 
     import_nodes = get_import_nodes(str(filename))
-    local_import_nodes = get_local_import_nodes(import_nodes, local_packages_tree)
+    local_import_nodes = filter(is_local_import, import_nodes)
 
     for node in local_import_nodes:
         #
         # Check for allowed imports
         #
-        import_violations += check_for_allowed_imports(
+        import_violations += check_for_allowed(
+            mode=ModuleTreeBuildingMode.IMPORT,
             app_root_path=app_root_path,
-            filename=filename,
+            file=filename,
             config_lookup=config_lookup,
             node=node,
         )
@@ -322,9 +260,10 @@ def check_for_violations(
         #
         # Check for allowed exports
         #
-        export_violations += check_for_allowed_exports(
+        export_violations += check_for_allowed(
+            mode=ModuleTreeBuildingMode.EXPORT,
             app_root_path=app_root_path,
-            importing_file=filename,
+            file=filename,
             config_lookup=config_lookup,
             node=node,
         )
@@ -342,9 +281,9 @@ def main(argv: list[str] | None = None):
     parser.add_argument(
         "--app-root",
         dest="app_root",
-        default="",
-        help="Defines the root directory where your python application lives. "
-        "Must be relative to the cwd path of execution of this script. Default value is current working directory. Example: --app-root=src",
+        default=".",
+        help="Defines the root directory where your python application lives."
+        "Default value is current working directory. Example: --app-root=src",
     )
     args = parser.parse_args(argv)
 
@@ -352,12 +291,10 @@ def main(argv: list[str] | None = None):
         print(
             "--app-root argument does not point to root directory of python application"
         )
-        exit(-1)
+        exit(1)
 
-    path_of_execution = Path().cwd()
-    app_root_path = Path(f"{path_of_execution}/{args.app_root}")
+    app_root_path = Path(args.app_root).resolve()
 
-    packages_tree = get_package_tree(app_root_path)
     filenames_to_check = get_filenames_to_check(
         args.filenames, app_root_path=app_root_path
     )
@@ -370,7 +307,6 @@ def main(argv: list[str] | None = None):
         imp_violations, exp_violations = check_for_violations(
             filename=file,
             app_root_path=app_root_path,
-            local_packages_tree=packages_tree,
             config_lookup=config_lookup,
         )
         import_violations += imp_violations
@@ -387,4 +323,4 @@ def main(argv: list[str] | None = None):
             print(violation)
 
     if len(import_violations) + len(export_violations) > 0:
-        exit(-1)
+        exit(1)
