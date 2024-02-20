@@ -1,0 +1,7 @@
+# Need testing. Use at your own discretion.
+-   id: import-embargo
+    name: import-embargo
+    entry: import-embargo
+    language: python
+    types_or: [python]
+    minimum_pre_commit_version: '2.9.2'

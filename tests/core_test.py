@@ -1,19 +1,19 @@
-from operator import le
 from pathlib import Path
+
 import pytest
 
 from import_embargo.core import (
     Config,
     ModuleTreeBuildingMode,
+    build_allowed_modules_tree,
     get_filenames_to_check,
     get_files_in_dir,
     get_import_nodes,
+    get_package_config,
     get_package_tree,
+    is_operation_allowed,
     main,
 )
-from import_embargo.core import build_allowed_modules_tree
-from import_embargo.core import is_operation_allowed
-from import_embargo.core import get_package_config
 
 
 @pytest.mark.parametrize(
