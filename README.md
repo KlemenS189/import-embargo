@@ -22,7 +22,23 @@ If you strive for **Domain Driven Development**, this package can mark your pack
 
 - Only imports with absolute paths can be checked.
 
+## Install
+
+`import-embargo` is located at [https://pypi.org/project/import-embargo/](https://pypi.org/project/import-embargo/)
+
+Install with:
+
+```
+pip install import-embargo
+```
+
 ## Usage:
+
+After install, you can run the command as:
+
+```
+import-embargo .
+```
 
 Output of --help
 

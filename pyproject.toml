@@ -17,6 +17,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 include = [{ path = "LICENSE", format = "sdist" }]
+exclude = [{ path = "tests" }]
 repository = "https://github.com/KlemenS189/import-embargo"
 homepage = "https://github.com/KlemenS189/import-embargo"
 
