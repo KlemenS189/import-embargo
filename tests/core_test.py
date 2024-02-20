@@ -112,15 +112,15 @@ def test_get_import_nodes():
     assert result is not None
     assert len(result) == 3
     first_node = result[0]
-    assert first_node.module == "tests.test_structure.module_a.service"
+    assert first_node.module == "tests.test_structure.module_a"
     children = first_node.names
     assert len(children) == 1
-    assert children[0].name == "is_weather_nice_today"
+    assert children[0].name == "service"
 
     second_node = result[1]
-    assert second_node.module == "tests.test_structure.module_a"
+    assert second_node.module == "tests.test_structure.module_a.service"
     children = second_node.names
-    assert children[0].name == "service"
+    assert children[0].name == "is_weather_nice_today"
 
 
 def test_get_files_in_dir():
