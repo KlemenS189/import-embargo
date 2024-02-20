@@ -63,7 +63,7 @@ def get_package_config(
         path=str(potential_embargo_file),
         setting={},
     )
-    for (which, name) in [
+    for which, name in [
         (ModuleTreeBuildingMode.IMPORT, "allowed_import_modules"),
         (ModuleTreeBuildingMode.EXPORT, "allowed_export_modules"),
         (ModuleTreeBuildingMode.BYPASS, "bypass_export_check_for_modules"),
